@@ -1,4 +1,11 @@
-export default function Home() {
+import { createClient } from '@/lib/supabase/server'
+
+export default async function Home() {
+  const supabase = await createClient()
+  const { count: jugadoresCount } = await supabase
+    .from('jugadores')
+    .select('*', { count: 'exact', head: true })
+
   return (
     <div className="flex flex-col min-h-screen bg-white font-sans">
       {/* Navbar */}
@@ -17,7 +24,7 @@ export default function Home() {
             Cómo funciona
           </a>
           <a
-            href="#register"
+            href="/registro"
             className="px-4 py-2 rounded-lg text-white transition-colors"
             style={{ backgroundColor: "#1A6B3C" }}
           >
@@ -75,7 +82,7 @@ export default function Home() {
             {[
               { value: "500+", label: "Torneos jugados" },
               { value: "8 000+", label: "Partidos registrados" },
-              { value: "3 200+", label: "Jugadores activos" },
+              { value: jugadoresCount ? String(jugadoresCount) : "0", label: "Jugadores registrados" },
               { value: "98%", label: "Satisfacción" },
             ].map((stat) => (
               <div key={stat.label}>
