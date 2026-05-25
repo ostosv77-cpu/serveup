@@ -3,12 +3,13 @@
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
-type Categoria = 'A' | 'B' | 'C'
+type Categoria = 'A' | 'B' | 'C' | 'D'
 
-const CAT_META: Record<Categoria, { label: string; desc: string }> = {
-  A: { label: 'Categoría A', desc: 'Competitivo' },
-  B: { label: 'Categoría B', desc: 'Avanzado / Intermedio' },
-  C: { label: 'Categoría C', desc: 'Recreativo' },
+const CAT_META: Record<Categoria, { label: string; desc: string; bg: string; color: string }> = {
+  A: { label: 'Categoría A', desc: 'Abierta',      bg: '#fee2e2', color: '#dc2626' },
+  B: { label: 'Categoría B', desc: '4a categoría', bg: '#ffedd5', color: '#ea580c' },
+  C: { label: 'Categoría C', desc: '5a categoría', bg: '#dbeafe', color: '#2563eb' },
+  D: { label: 'Categoría D', desc: '6a categoría', bg: '#dcfce7', color: '#16a34a' },
 }
 
 const ESTADO_META: Record<string, { label: string; bg: string; color: string }> = {
@@ -17,28 +18,19 @@ const ESTADO_META: Record<string, { label: string; bg: string; color: string }> 
   finalizado:             { label: 'Finalizado',             bg: '#f3f4f6', color: '#6b7280' },
 }
 
-type CatData = { cupos: string; precio: string }
-
 type TorneoForm = {
   nombre: string
   ciudad: string
   pais: string
+  categoria: Categoria
   li: string
   lf: string
   pi: string
   pf: string
+  cupos_maximos: string
+  precio_inscripcion: string
   descripcion: string
-  cats: Record<Categoria, boolean>
-  catData: Record<Categoria, CatData>
-}
-
-type CategoriaDB = {
-  id: string
-  torneo_id: string
-  categoria: Categoria
-  cupos_maximos: number
-  cupos_disponibles: number
-  precio_inscripcion: number
+  estado: string
 }
 
 type Torneo = {
@@ -52,21 +44,37 @@ type Torneo = {
   fecha_playoffs_fin: string
   descripcion: string | null
   estado: string
+  categoria: Categoria
+  cupos_maximos: number
+  cupos_disponibles: number
+  precio_inscripcion: number
   created_at: string
-  categorias_torneo: CategoriaDB[]
 }
 
 function initForm(): TorneoForm {
   return {
     nombre: '', ciudad: '', pais: 'Colombia',
+    categoria: 'A',
     li: '', lf: '', pi: '', pf: '',
-    descripcion: '',
-    cats: { A: false, B: false, C: false },
-    catData: {
-      A: { cupos: '', precio: '' },
-      B: { cupos: '', precio: '' },
-      C: { cupos: '', precio: '' },
-    },
+    cupos_maximos: '', precio_inscripcion: '',
+    descripcion: '', estado: 'inscripciones_abiertas',
+  }
+}
+
+function torneoToForm(t: Torneo): TorneoForm {
+  return {
+    nombre: t.nombre,
+    ciudad: t.ciudad,
+    pais: t.pais,
+    categoria: t.categoria,
+    li: t.fecha_liga_inicio,
+    lf: t.fecha_liga_fin,
+    pi: t.fecha_playoffs_inicio,
+    pf: t.fecha_playoffs_fin,
+    cupos_maximos: String(t.cupos_maximos),
+    precio_inscripcion: String(t.precio_inscripcion),
+    descripcion: t.descripcion ?? '',
+    estado: t.estado,
   }
 }
 
@@ -79,16 +87,15 @@ function fmtDate(d: string) {
 
 function fmtCOP(n: number) {
   return new Intl.NumberFormat('es-CO', {
-    style: 'currency',
-    currency: 'COP',
-    maximumFractionDigits: 0,
+    style: 'currency', currency: 'COP', maximumFractionDigits: 0,
   }).format(n)
 }
 
 export default function TorneosSection() {
-  const [view, setView] = useState<'list' | 'form'>('list')
+  const [view, setView] = useState<'list' | 'create' | 'edit'>('list')
   const [torneos, setTorneos] = useState<Torneo[]>([])
   const [loading, setLoading] = useState(true)
+  const [editTarget, setEditTarget] = useState<Torneo | null>(null)
   const [detailTorneo, setDetailTorneo] = useState<Torneo | null>(null)
   const [form, setForm] = useState<TorneoForm>(initForm())
   const [formError, setFormError] = useState<string | null>(null)
@@ -99,7 +106,7 @@ export default function TorneosSection() {
     const supabase = createClient()
     const { data } = await supabase
       .from('torneos')
-      .select('*, categorias_torneo(*)')
+      .select('*')
       .order('created_at', { ascending: false })
     setTorneos((data as Torneo[]) ?? [])
     setLoading(false)
@@ -115,20 +122,13 @@ export default function TorneosSection() {
     if (!form.lf) return 'Introduce la fecha de fin de la fase liga.'
     if (!form.pi) return 'Introduce la fecha de inicio de la fase playoffs.'
     if (!form.pf) return 'Introduce la fecha de fin de la fase playoffs.'
-
     if (form.li >= form.lf) return 'Inicio de liga debe ser anterior al fin de liga.'
     if (form.lf >= form.pi) return 'Fin de liga debe ser anterior al inicio de playoffs.'
     if (form.pi >= form.pf) return 'Inicio de playoffs debe ser anterior al fin de playoffs.'
-
-    const active = (['A', 'B', 'C'] as Categoria[]).filter(c => form.cats[c])
-    if (!active.length) return 'Selecciona al menos una categoría.'
-
-    for (const c of active) {
-      const cupos = parseInt(form.catData[c].cupos)
-      const precio = parseFloat(form.catData[c].precio)
-      if (!form.catData[c].cupos || cupos <= 0) return `Categoría ${c}: los cupos deben ser mayores que 0.`
-      if (!form.catData[c].precio || isNaN(precio) || precio < 0) return `Categoría ${c}: el precio de inscripción es inválido.`
-    }
+    if (!form.cupos_maximos || parseInt(form.cupos_maximos) <= 0)
+      return 'Los cupos máximos deben ser mayores que 0.'
+    if (!form.precio_inscripcion || isNaN(parseFloat(form.precio_inscripcion)) || parseFloat(form.precio_inscripcion) < 0)
+      return 'El precio de inscripción es inválido.'
     return null
   }
 
@@ -138,41 +138,25 @@ export default function TorneosSection() {
     setSaving(true)
     setFormError(null)
     const supabase = createClient()
+    const cupos = parseInt(form.cupos_maximos)
 
-    const { data: torneo, error: e1 } = await supabase
-      .from('torneos')
-      .insert({
-        nombre: form.nombre.trim(),
-        ciudad: form.ciudad.trim(),
-        pais: form.pais.trim(),
-        fecha_liga_inicio: form.li,
-        fecha_liga_fin: form.lf,
-        fecha_playoffs_inicio: form.pi,
-        fecha_playoffs_fin: form.pf,
-        descripcion: form.descripcion.trim() || null,
-      })
-      .select()
-      .single()
+    const { error } = await supabase.from('torneos').insert({
+      nombre: form.nombre.trim(),
+      ciudad: form.ciudad.trim(),
+      pais: form.pais.trim(),
+      categoria: form.categoria,
+      fecha_liga_inicio: form.li,
+      fecha_liga_fin: form.lf,
+      fecha_playoffs_inicio: form.pi,
+      fecha_playoffs_fin: form.pf,
+      cupos_maximos: cupos,
+      cupos_disponibles: cupos,
+      precio_inscripcion: parseFloat(form.precio_inscripcion),
+      descripcion: form.descripcion.trim() || null,
+    })
 
-    if (e1 || !torneo) {
+    if (error) {
       setFormError('Error al crear el torneo. Inténtalo de nuevo.')
-      setSaving(false)
-      return
-    }
-
-    const active = (['A', 'B', 'C'] as Categoria[]).filter(c => form.cats[c])
-    const { error: e2 } = await supabase.from('categorias_torneo').insert(
-      active.map(c => ({
-        torneo_id: torneo.id,
-        categoria: c,
-        cupos_maximos: parseInt(form.catData[c].cupos),
-        cupos_disponibles: parseInt(form.catData[c].cupos),
-        precio_inscripcion: parseFloat(form.catData[c].precio),
-      }))
-    )
-
-    if (e2) {
-      setFormError('Torneo creado, pero hubo un error al guardar las categorías.')
     } else {
       setForm(initForm())
       setView('list')
@@ -181,25 +165,63 @@ export default function TorneosSection() {
     setSaving(false)
   }
 
+  async function handleEdit() {
+    if (!editTarget) return
+    const err = validate()
+    if (err) { setFormError(err); return }
+    setSaving(true)
+    setFormError(null)
+    const supabase = createClient()
+
+    const cuposNew = parseInt(form.cupos_maximos)
+    const diff = cuposNew - editTarget.cupos_maximos
+    const disponiblesNew = Math.max(0, editTarget.cupos_disponibles + diff)
+
+    const { error } = await supabase.from('torneos').update({
+      nombre: form.nombre.trim(),
+      ciudad: form.ciudad.trim(),
+      pais: form.pais.trim(),
+      categoria: form.categoria,
+      fecha_liga_inicio: form.li,
+      fecha_liga_fin: form.lf,
+      fecha_playoffs_inicio: form.pi,
+      fecha_playoffs_fin: form.pf,
+      cupos_maximos: cuposNew,
+      cupos_disponibles: disponiblesNew,
+      precio_inscripcion: parseFloat(form.precio_inscripcion),
+      descripcion: form.descripcion.trim() || null,
+      estado: form.estado,
+    }).eq('id', editTarget.id)
+
+    if (error) {
+      setFormError('Error al guardar los cambios. Inténtalo de nuevo.')
+    } else {
+      cancelForm()
+      await fetchTorneos()
+    }
+    setSaving(false)
+  }
+
+  function openEdit(t: Torneo) {
+    setEditTarget(t)
+    setForm(torneoToForm(t))
+    setFormError(null)
+    setView('edit')
+  }
+
   function cancelForm() {
     setView('list')
     setFormError(null)
     setForm(initForm())
+    setEditTarget(null)
   }
 
-  // ── Form view ──────────────────────────────────────────────────────────────
-  if (view === 'form') {
+  const isEdit = view === 'edit'
+
+  // ── Form view (create or edit) ─────────────────────────────────────────────
+  if (view === 'create' || view === 'edit') {
     const setF = <K extends keyof TorneoForm>(k: K, v: TorneoForm[K]) =>
       setForm(prev => ({ ...prev, [k]: v }))
-
-    const toggleCat = (c: Categoria) =>
-      setForm(prev => ({ ...prev, cats: { ...prev.cats, [c]: !prev.cats[c] } }))
-
-    const setCatField = (c: Categoria, k: keyof CatData, v: string) =>
-      setForm(prev => ({
-        ...prev,
-        catData: { ...prev.catData, [c]: { ...prev.catData[c], [k]: v } },
-      }))
 
     return (
       <div>
@@ -210,13 +232,20 @@ export default function TorneosSection() {
           <ChevronLeftIcon /> Torneos
         </button>
 
-        <h1 className="text-2xl font-bold text-gray-900 mb-1">Crear nuevo torneo</h1>
-        <p className="text-gray-500 text-sm mb-8">Completa la información para publicar el torneo.</p>
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">
+          {isEdit ? 'Editar torneo' : 'Crear nuevo torneo'}
+        </h1>
+        <p className="text-gray-500 text-sm mb-8">
+          {isEdit
+            ? 'Modifica los datos del torneo y guarda los cambios.'
+            : 'Completa la información para publicar el torneo.'}
+        </p>
 
         <div className="max-w-2xl flex flex-col gap-5">
           {/* Información general */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 flex flex-col gap-4">
             <h2 className="font-semibold text-gray-900">Información general</h2>
+
             <Field label="Nombre del torneo">
               <input
                 type="text"
@@ -226,6 +255,7 @@ export default function TorneosSection() {
                 className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-[#1A6B3C] transition-colors"
               />
             </Field>
+
             <div className="grid grid-cols-2 gap-4">
               <Field label="Ciudad">
                 <input
@@ -245,6 +275,44 @@ export default function TorneosSection() {
                 />
               </Field>
             </div>
+
+            <Field label="Categoría del torneo">
+              <select
+                value={form.categoria}
+                onChange={e => setF('categoria', e.target.value as Categoria)}
+                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-[#1A6B3C] transition-colors bg-white"
+              >
+                {(['A', 'B', 'C', 'D'] as Categoria[]).map(c => (
+                  <option key={c} value={c}>
+                    {CAT_META[c].label} — {CAT_META[c].desc}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Cupos máximos">
+                <input
+                  type="number"
+                  min="1"
+                  value={form.cupos_maximos}
+                  onChange={e => setF('cupos_maximos', e.target.value)}
+                  placeholder="Ej. 16"
+                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-[#1A6B3C] transition-colors"
+                />
+              </Field>
+              <Field label="Precio inscripción (COP)">
+                <input
+                  type="number"
+                  min="0"
+                  value={form.precio_inscripcion}
+                  onChange={e => setF('precio_inscripcion', e.target.value)}
+                  placeholder="Ej. 150000"
+                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-[#1A6B3C] transition-colors"
+                />
+              </Field>
+            </div>
+
             <Field label="Descripción (opcional)">
               <textarea
                 value={form.descripcion}
@@ -254,6 +322,20 @@ export default function TorneosSection() {
                 className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-[#1A6B3C] transition-colors resize-none"
               />
             </Field>
+
+            {isEdit && (
+              <Field label="Estado">
+                <select
+                  value={form.estado}
+                  onChange={e => setF('estado', e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-[#1A6B3C] transition-colors bg-white"
+                >
+                  <option value="inscripciones_abiertas">Inscripciones abiertas</option>
+                  <option value="en_curso">En curso</option>
+                  <option value="finalizado">Finalizado</option>
+                </select>
+              </Field>
+            )}
           </div>
 
           {/* Fase Liga */}
@@ -308,67 +390,6 @@ export default function TorneosSection() {
             </div>
           </div>
 
-          {/* Categorías */}
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 flex flex-col gap-5">
-            <div>
-              <h2 className="font-semibold text-gray-900">Categorías</h2>
-              <p className="text-xs text-gray-400 mt-0.5">Activa las categorías y configura cupos y precio</p>
-            </div>
-
-            {(['A', 'B', 'C'] as Categoria[]).map(c => (
-              <div key={c}>
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={form.cats[c]}
-                    onChange={() => toggleCat(c)}
-                    className="sr-only"
-                  />
-                  <div
-                    className={`w-5 h-5 rounded flex items-center justify-center border-2 flex-shrink-0 transition-colors ${
-                      form.cats[c] ? 'border-[#1A6B3C] bg-[#1A6B3C]' : 'border-gray-300 bg-white'
-                    }`}
-                  >
-                    {form.cats[c] && (
-                      <svg width="11" height="8" viewBox="0 0 11 8" fill="none">
-                        <path d="M1 4L4 7L10 1" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    )}
-                  </div>
-                  <div>
-                    <span className="text-sm font-medium text-gray-900">{CAT_META[c].label}</span>
-                    <span className="text-xs text-gray-400 ml-2">{CAT_META[c].desc}</span>
-                  </div>
-                </label>
-
-                {form.cats[c] && (
-                  <div className="mt-3 ml-8 grid grid-cols-2 gap-4">
-                    <Field label="Cupos máximos">
-                      <input
-                        type="number"
-                        min="1"
-                        value={form.catData[c].cupos}
-                        onChange={e => setCatField(c, 'cupos', e.target.value)}
-                        placeholder="Ej. 16"
-                        className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-[#1A6B3C] transition-colors"
-                      />
-                    </Field>
-                    <Field label="Precio inscripción (COP)">
-                      <input
-                        type="number"
-                        min="0"
-                        value={form.catData[c].precio}
-                        onChange={e => setCatField(c, 'precio', e.target.value)}
-                        placeholder="Ej. 150000"
-                        className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-[#1A6B3C] transition-colors"
-                      />
-                    </Field>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-
           {formError && (
             <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-red-600 text-sm">
               {formError}
@@ -383,12 +404,14 @@ export default function TorneosSection() {
               Cancelar
             </button>
             <button
-              onClick={handleCreate}
+              onClick={isEdit ? handleEdit : handleCreate}
               disabled={saving}
               className="px-8 py-2.5 rounded-xl text-white text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-60"
               style={{ backgroundColor: '#1A6B3C' }}
             >
-              {saving ? 'Creando torneo…' : 'Crear torneo'}
+              {saving
+                ? (isEdit ? 'Guardando…' : 'Creando torneo…')
+                : (isEdit ? 'Guardar cambios' : 'Crear torneo')}
             </button>
           </div>
         </div>
@@ -409,7 +432,7 @@ export default function TorneosSection() {
           </p>
         </div>
         <button
-          onClick={() => setView('form')}
+          onClick={() => setView('create')}
           className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold shadow-sm transition-opacity hover:opacity-90"
           style={{ backgroundColor: '#1A6B3C' }}
         >
@@ -420,14 +443,12 @@ export default function TorneosSection() {
       {loading ? (
         <div className="text-center py-16 text-gray-400 text-sm">Cargando torneos…</div>
       ) : torneos.length === 0 ? (
-        <EmptyState onCreateClick={() => setView('form')} />
+        <EmptyState onCreateClick={() => setView('create')} />
       ) : (
         <div className="flex flex-col gap-4">
           {torneos.map(t => {
             const estado = ESTADO_META[t.estado] ?? ESTADO_META.inscripciones_abiertas
-            const cats = (t.categorias_torneo ?? []).sort((a, b) =>
-              a.categoria.localeCompare(b.categoria)
-            )
+            const cat = CAT_META[t.categoria] ?? CAT_META.A
             return (
               <div
                 key={t.id}
@@ -438,16 +459,21 @@ export default function TorneosSection() {
                     <h2 className="font-semibold text-gray-900 text-base">{t.nombre}</h2>
                     <span
                       className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold flex-shrink-0"
+                      style={{ backgroundColor: cat.bg, color: cat.color }}
+                    >
+                      {cat.label} · {cat.desc}
+                    </span>
+                    <span
+                      className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold flex-shrink-0"
                       style={{ backgroundColor: estado.bg, color: estado.color }}
                     >
                       {estado.label}
                     </span>
                   </div>
-                  <p className="text-sm text-gray-500 mb-3">
-                    {t.ciudad}, {t.pais}
-                  </p>
 
-                  <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-500 mb-3">
+                  <p className="text-sm text-gray-500 mb-3">{t.ciudad}, {t.pais}</p>
+
+                  <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-500 mb-2">
                     <span>
                       <span className="font-medium text-gray-700">Liga: </span>
                       {fmtDate(t.fecha_liga_inicio)} – {fmtDate(t.fecha_liga_fin)}
@@ -458,25 +484,33 @@ export default function TorneosSection() {
                     </span>
                   </div>
 
-                  <div className="flex flex-wrap gap-2">
-                    {cats.map(cat => (
-                      <span
-                        key={cat.id}
-                        className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold"
-                        style={{ backgroundColor: '#f0faf4', color: '#1A6B3C' }}
-                      >
-                        Cat. {cat.categoria} · {cat.cupos_disponibles}/{cat.cupos_maximos} cupos
-                      </span>
-                    ))}
+                  <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500">
+                    <span>
+                      <span className="font-medium text-gray-700">Cupos: </span>
+                      {t.cupos_disponibles} disponibles / {t.cupos_maximos} máx.
+                    </span>
+                    <span className="text-gray-300">·</span>
+                    <span>
+                      <span className="font-medium text-gray-700">Inscripción: </span>
+                      {fmtCOP(t.precio_inscripcion)}
+                    </span>
                   </div>
                 </div>
 
-                <button
-                  onClick={() => setDetailTorneo(t)}
-                  className="flex-shrink-0 px-4 py-2 rounded-xl text-sm font-medium border border-gray-200 text-gray-600 hover:border-[#1A6B3C] hover:text-[#1A6B3C] transition-colors"
-                >
-                  Ver detalles
-                </button>
+                <div className="flex flex-shrink-0 gap-2">
+                  <button
+                    onClick={() => openEdit(t)}
+                    className="px-4 py-2 rounded-xl text-sm font-medium border border-gray-200 text-gray-600 hover:border-[#1A6B3C] hover:text-[#1A6B3C] transition-colors"
+                  >
+                    Editar
+                  </button>
+                  <button
+                    onClick={() => setDetailTorneo(t)}
+                    className="px-4 py-2 rounded-xl text-sm font-medium border border-gray-200 text-gray-600 hover:border-[#1A6B3C] hover:text-[#1A6B3C] transition-colors"
+                  >
+                    Ver detalles
+                  </button>
+                </div>
               </div>
             )
           })}
@@ -520,9 +554,7 @@ function EmptyState({ onCreateClick }: { onCreateClick: () => void }) {
 
 function DetailModal({ torneo, onClose }: { torneo: Torneo; onClose: () => void }) {
   const estado = ESTADO_META[torneo.estado] ?? ESTADO_META.inscripciones_abiertas
-  const cats = (torneo.categorias_torneo ?? []).sort((a, b) =>
-    a.categoria.localeCompare(b.categoria)
-  )
+  const cat = CAT_META[torneo.categoria] ?? CAT_META.A
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -540,54 +572,46 @@ function DetailModal({ torneo, onClose }: { torneo: Torneo; onClose: () => void 
           </button>
         </div>
 
-        <span
-          className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold mb-5"
-          style={{ backgroundColor: estado.bg, color: estado.color }}
-        >
-          {estado.label}
-        </span>
+        <div className="flex flex-wrap gap-2 mb-5">
+          <span
+            className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold"
+            style={{ backgroundColor: cat.bg, color: cat.color }}
+          >
+            {cat.label} · {cat.desc}
+          </span>
+          <span
+            className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold"
+            style={{ backgroundColor: estado.bg, color: estado.color }}
+          >
+            {estado.label}
+          </span>
+        </div>
 
         <div className="flex flex-col gap-4">
           <div className="grid grid-cols-2 gap-3">
-            <DetailBlock label="Liga — inicio" value={fmtDate(torneo.fecha_liga_inicio)} />
-            <DetailBlock label="Liga — fin" value={fmtDate(torneo.fecha_liga_fin)} />
+            <DetailBlock label="Liga — inicio"     value={fmtDate(torneo.fecha_liga_inicio)} />
+            <DetailBlock label="Liga — fin"        value={fmtDate(torneo.fecha_liga_fin)} />
             <DetailBlock label="Playoffs — inicio" value={fmtDate(torneo.fecha_playoffs_inicio)} />
-            <DetailBlock label="Playoffs — fin" value={fmtDate(torneo.fecha_playoffs_fin)} />
+            <DetailBlock label="Playoffs — fin"    value={fmtDate(torneo.fecha_playoffs_fin)} />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <DetailBlock
+              label="Cupos disponibles"
+              value={`${torneo.cupos_disponibles} / ${torneo.cupos_maximos}`}
+            />
+            <DetailBlock
+              label="Precio inscripción"
+              value={fmtCOP(torneo.precio_inscripcion)}
+            />
           </div>
 
           {torneo.descripcion && (
             <div>
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Descripción</p>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+                Descripción
+              </p>
               <p className="text-sm text-gray-700 leading-relaxed">{torneo.descripcion}</p>
-            </div>
-          )}
-
-          {cats.length > 0 && (
-            <div>
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Categorías</p>
-              <div className="flex flex-col gap-2">
-                {cats.map(cat => (
-                  <div
-                    key={cat.id}
-                    className="flex items-center justify-between px-4 py-3 rounded-xl bg-gray-50 border border-gray-100"
-                  >
-                    <div>
-                      <p className="text-sm font-semibold text-gray-900">
-                        Categoría {cat.categoria}
-                        <span className="font-normal text-gray-500 ml-1.5">
-                          — {CAT_META[cat.categoria]?.desc}
-                        </span>
-                      </p>
-                      <p className="text-xs text-gray-500 mt-0.5">
-                        {cat.cupos_disponibles} / {cat.cupos_maximos} cupos disponibles
-                      </p>
-                    </div>
-                    <p className="text-sm font-semibold" style={{ color: '#1A6B3C' }}>
-                      {fmtCOP(cat.precio_inscripcion)}
-                    </p>
-                  </div>
-                ))}
-              </div>
             </div>
           )}
         </div>
@@ -620,8 +644,6 @@ function DetailBlock({ label, value }: { label: string; value: string }) {
     </div>
   )
 }
-
-// ── Icons ──────────────────────────────────────────────────────────────────
 
 function ChevronLeftIcon() {
   return (
