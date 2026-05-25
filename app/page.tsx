@@ -59,8 +59,7 @@ export default async function Home() {
           </p>
           <div className="mt-10 flex flex-col sm:flex-row gap-4 w-full justify-center">
             <a
-              id="register"
-              href="#register"
+              href="/registro"
               className="px-8 py-3.5 rounded-xl text-white text-base font-semibold shadow-md transition-opacity hover:opacity-90"
               style={{ backgroundColor: "#1A6B3C" }}
             >
@@ -163,7 +162,7 @@ export default async function Home() {
             Únete a miles de organizadores y jugadores que ya confían en ServeUp.
           </p>
           <a
-            href="#register"
+            href="/registro"
             className="mt-8 px-10 py-4 rounded-xl bg-white font-semibold text-base transition-opacity hover:opacity-90"
             style={{ color: "#1A6B3C" }}
           >
