@@ -45,10 +45,10 @@ type Torneo = {
   fecha_playoffs_inicio: string
   fecha_playoffs_fin: string
   descripcion: string | null
-  estado: string
+  estado: string | null
   categoria: Categoria
   cupos_maximos: number
-  cupos_disponibles: number
+  cupos_disponibles: number | null
   precio_inscripcion: number
   created_at: string
 }
@@ -76,7 +76,7 @@ function torneoToForm(t: Torneo): TorneoForm {
     cupos_maximos: String(t.cupos_maximos),
     precio_inscripcion: String(t.precio_inscripcion),
     descripcion: t.descripcion ?? '',
-    estado: t.estado,
+    estado: t.estado ?? 'borrador',
   }
 }
 
@@ -229,7 +229,8 @@ export default function TorneosSection() {
 
   async function handleDelete() {
     if (!deleteTarget) return
-    if (deleteTarget.cupos_disponibles < deleteTarget.cupos_maximos) {
+    const disponibles = deleteTarget.cupos_disponibles ?? deleteTarget.cupos_maximos
+    if (disponibles < deleteTarget.cupos_maximos) {
       setDeleteError('No se puede eliminar un torneo con jugadores inscritos.')
       return
     }
@@ -546,7 +547,7 @@ export default function TorneosSection() {
                   <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500">
                     <span>
                       <span className="font-medium text-gray-700">Cupos: </span>
-                      {t.cupos_disponibles} disponibles / {t.cupos_maximos} máx.
+                      {t.cupos_disponibles ?? t.cupos_maximos} disponibles / {t.cupos_maximos} máx.
                     </span>
                     <span className="text-gray-300">·</span>
                     <span>
@@ -765,7 +766,7 @@ function DeleteModal({
   onConfirm: () => void
   onCancel: () => void
 }) {
-  const hasInscribed = torneo.cupos_disponibles < torneo.cupos_maximos
+  const hasInscribed = (torneo.cupos_disponibles ?? torneo.cupos_maximos) < torneo.cupos_maximos
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
