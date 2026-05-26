@@ -504,7 +504,8 @@ export default function TorneosSection() {
       ) : (
         <div className="flex flex-col gap-4">
           {torneos.map(t => {
-            const estado = ESTADO_META[t.estado] ?? ESTADO_META.borrador
+            const estadoKey = (t.estado ?? 'borrador') as string
+            const estado = ESTADO_META[estadoKey] ?? ESTADO_META.borrador
             const cat = CAT_META[t.categoria] ?? CAT_META.A
             const isActioning = actionLoading === t.id
             return (
@@ -556,7 +557,7 @@ export default function TorneosSection() {
                 </div>
 
                 <div className="flex flex-shrink-0 flex-col gap-2 min-w-[130px]">
-                  {t.estado === 'borrador' && (
+                  {estadoKey === 'borrador' && (
                     <>
                       <button
                         onClick={() => handlePublish(t)}
@@ -583,13 +584,13 @@ export default function TorneosSection() {
                     </>
                   )}
 
-                  {t.estado === 'publicado' && (
+                  {estadoKey === 'publicado' && (
                     <>
                       <div className="flex gap-2">
                         <button
                           onClick={() => handleUnpublish(t)}
                           disabled={isActioning}
-                          className="flex-1 px-3 py-2 rounded-xl text-sm font-medium border border-gray-200 text-gray-600 hover:border-gray-400 transition-colors disabled:opacity-60"
+                          className="flex-1 px-3 py-2 rounded-xl text-sm font-medium border border-amber-200 text-amber-600 hover:bg-amber-50 transition-colors disabled:opacity-60"
                         >
                           {isActioning ? '…' : 'Despublicar'}
                         </button>
@@ -609,19 +610,23 @@ export default function TorneosSection() {
                     </>
                   )}
 
-                  {t.estado === 'en_curso' && (
-                    <button className="w-full px-4 py-2 rounded-xl text-sm font-medium border border-gray-200 text-gray-600 hover:border-[#1A6B3C] hover:text-[#1A6B3C] transition-colors">
+                  {estadoKey === 'en_curso' && (
+                    <button className="w-full px-4 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                      style={{ backgroundColor: '#2563eb' }}
+                    >
                       Ver partidos
                     </button>
                   )}
 
-                  {t.estado === 'playoffs' && (
-                    <button className="w-full px-4 py-2 rounded-xl text-sm font-medium border border-gray-200 text-gray-600 hover:border-[#2563eb] hover:text-[#2563eb] transition-colors">
+                  {estadoKey === 'playoffs' && (
+                    <button className="w-full px-4 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                      style={{ backgroundColor: '#2563eb' }}
+                    >
                       Ver bracket
                     </button>
                   )}
 
-                  {t.estado === 'finalizado' && (
+                  {estadoKey === 'finalizado' && (
                     <button className="w-full px-4 py-2 rounded-xl text-sm font-medium border border-gray-200 text-gray-500 hover:bg-gray-50 transition-colors">
                       Ver historial
                     </button>
@@ -770,8 +775,8 @@ function DeleteModal({
         </div>
         <h2 className="text-lg font-bold text-gray-900 mb-1">¿Eliminar torneo?</h2>
         <p className="text-sm text-gray-500 mb-5">
-          Se eliminará permanentemente{' '}
-          <span className="font-semibold text-gray-700">{torneo.nombre}</span>.
+          ¿Estás seguro que deseas eliminar{' '}
+          <span className="font-semibold text-gray-700">{torneo.nombre}</span>?
           Esta acción no se puede deshacer.
         </p>
 
