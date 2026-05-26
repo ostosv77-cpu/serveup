@@ -2,9 +2,13 @@ import { createClient } from '@/lib/supabase/server'
 
 export default async function Home() {
   const supabase = await createClient()
-  const { count: jugadoresCount } = await supabase
-    .from('jugadores')
-    .select('*', { count: 'exact', head: true })
+  const [
+    { count: jugadoresCount },
+    { data: { user } },
+  ] = await Promise.all([
+    supabase.from('jugadores').select('*', { count: 'exact', head: true }),
+    supabase.auth.getUser(),
+  ])
 
   return (
     <div className="flex flex-col min-h-screen bg-white font-sans">
@@ -26,13 +30,23 @@ export default async function Home() {
           <a href="/torneos" className="hover:text-[#1A6B3C] transition-colors">
             Torneos
           </a>
-          <a
-            href="/registro"
-            className="px-4 py-2 rounded-lg text-white transition-colors"
-            style={{ backgroundColor: "#1A6B3C" }}
-          >
-            Registrarse
-          </a>
+          {user ? (
+            <a
+              href="/perfil"
+              className="px-4 py-2 rounded-lg text-white transition-colors"
+              style={{ backgroundColor: "#1A6B3C" }}
+            >
+              Mi perfil
+            </a>
+          ) : (
+            <a
+              href="/registro"
+              className="px-4 py-2 rounded-lg text-white transition-colors"
+              style={{ backgroundColor: "#1A6B3C" }}
+            >
+              Registrarse
+            </a>
+          )}
         </nav>
         {/* Mobile menu button placeholder */}
         <button className="md:hidden p-2 rounded-lg text-gray-600 hover:bg-gray-100">

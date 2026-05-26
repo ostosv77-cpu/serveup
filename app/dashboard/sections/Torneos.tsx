@@ -184,7 +184,7 @@ export default function TorneosSection() {
 
     const cuposNew = parseInt(form.cupos_maximos)
     const diff = cuposNew - editTarget.cupos_maximos
-    const disponiblesNew = Math.max(0, editTarget.cupos_disponibles + diff)
+    const disponiblesNew = Math.max(0, (editTarget.cupos_disponibles ?? editTarget.cupos_maximos) + diff)
 
     const { error } = await supabase.from('torneos').update({
       nombre: form.nombre.trim(),
@@ -685,7 +685,7 @@ function EmptyState({ onCreateClick }: { onCreateClick: () => void }) {
 }
 
 function DetailModal({ torneo, onClose }: { torneo: Torneo; onClose: () => void }) {
-  const estado = ESTADO_META[torneo.estado] ?? ESTADO_META.borrador
+  const estado = ESTADO_META[torneo.estado ?? 'borrador'] ?? ESTADO_META.borrador
   const cat = CAT_META[torneo.categoria] ?? CAT_META.A
 
   return (
