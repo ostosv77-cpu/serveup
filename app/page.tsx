@@ -23,6 +23,9 @@ export default async function Home() {
           <a href="#how-it-works" className="hover:text-[#1A6B3C] transition-colors">
             Cómo funciona
           </a>
+          <a href="/torneos" className="hover:text-[#1A6B3C] transition-colors">
+            Torneos
+          </a>
           <a
             href="/registro"
             className="px-4 py-2 rounded-lg text-white transition-colors"

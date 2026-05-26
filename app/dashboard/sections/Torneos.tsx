@@ -13,9 +13,11 @@ const CAT_META: Record<Categoria, { label: string; desc: string; bg: string; col
 }
 
 const ESTADO_META: Record<string, { label: string; bg: string; color: string }> = {
-  inscripciones_abiertas: { label: 'Inscripciones abiertas', bg: '#dcfce7', color: '#16a34a' },
-  en_curso:               { label: 'En curso',               bg: '#fef9c3', color: '#ca8a04' },
-  finalizado:             { label: 'Finalizado',             bg: '#f3f4f6', color: '#6b7280' },
+  borrador:   { label: 'Borrador',   bg: '#f3f4f6', color: '#6b7280' },
+  publicado:  { label: 'Publicado',  bg: '#dcfce7', color: '#1A6B3C' },
+  en_curso:   { label: 'En curso',   bg: '#fef9c3', color: '#ca8a04' },
+  playoffs:   { label: 'Playoffs',   bg: '#dbeafe', color: '#2563eb' },
+  finalizado: { label: 'Finalizado', bg: '#e5e7eb', color: '#374151' },
 }
 
 type TorneoForm = {
@@ -57,7 +59,7 @@ function initForm(): TorneoForm {
     categoria: 'A',
     li: '', lf: '', pi: '', pf: '',
     cupos_maximos: '', precio_inscripcion: '',
-    descripcion: '', estado: 'inscripciones_abiertas',
+    descripcion: '', estado: 'borrador',
   }
 }
 
@@ -97,9 +99,14 @@ export default function TorneosSection() {
   const [loading, setLoading] = useState(true)
   const [editTarget, setEditTarget] = useState<Torneo | null>(null)
   const [detailTorneo, setDetailTorneo] = useState<Torneo | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<Torneo | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [deleteLoading, setDeleteLoading] = useState(false)
   const [form, setForm] = useState<TorneoForm>(initForm())
   const [formError, setFormError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [successMsg, setSuccessMsg] = useState<string | null>(null)
+  const [actionLoading, setActionLoading] = useState<string | null>(null)
 
   const fetchTorneos = useCallback(async () => {
     setLoading(true)
@@ -153,12 +160,14 @@ export default function TorneosSection() {
       cupos_disponibles: cupos,
       precio_inscripcion: parseFloat(form.precio_inscripcion),
       descripcion: form.descripcion.trim() || null,
+      estado: 'borrador',
     })
 
     if (error) {
       setFormError('Error al crear el torneo. Inténtalo de nuevo.')
     } else {
       setForm(initForm())
+      setSuccessMsg('Torneo creado en borrador. Publícalo cuando esté listo.')
       setView('list')
       await fetchTorneos()
     }
@@ -202,6 +211,41 @@ export default function TorneosSection() {
     setSaving(false)
   }
 
+  async function handlePublish(t: Torneo) {
+    setActionLoading(t.id)
+    const supabase = createClient()
+    await supabase.from('torneos').update({ estado: 'publicado' }).eq('id', t.id)
+    setActionLoading(null)
+    await fetchTorneos()
+  }
+
+  async function handleUnpublish(t: Torneo) {
+    setActionLoading(t.id)
+    const supabase = createClient()
+    await supabase.from('torneos').update({ estado: 'borrador' }).eq('id', t.id)
+    setActionLoading(null)
+    await fetchTorneos()
+  }
+
+  async function handleDelete() {
+    if (!deleteTarget) return
+    if (deleteTarget.cupos_disponibles < deleteTarget.cupos_maximos) {
+      setDeleteError('No se puede eliminar un torneo con jugadores inscritos.')
+      return
+    }
+    setDeleteLoading(true)
+    setDeleteError(null)
+    const supabase = createClient()
+    const { error } = await supabase.from('torneos').delete().eq('id', deleteTarget.id)
+    if (error) {
+      setDeleteError('Error al eliminar el torneo.')
+    } else {
+      setDeleteTarget(null)
+      await fetchTorneos()
+    }
+    setDeleteLoading(false)
+  }
+
   function openEdit(t: Torneo) {
     setEditTarget(t)
     setForm(torneoToForm(t))
@@ -238,11 +282,10 @@ export default function TorneosSection() {
         <p className="text-gray-500 text-sm mb-8">
           {isEdit
             ? 'Modifica los datos del torneo y guarda los cambios.'
-            : 'Completa la información para publicar el torneo.'}
+            : 'El torneo se guardará en borrador. Podrás publicarlo cuando esté listo.'}
         </p>
 
         <div className="max-w-2xl flex flex-col gap-5">
-          {/* Información general */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 flex flex-col gap-4">
             <h2 className="font-semibold text-gray-900">Información general</h2>
 
@@ -330,15 +373,16 @@ export default function TorneosSection() {
                   onChange={e => setF('estado', e.target.value)}
                   className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-[#1A6B3C] transition-colors bg-white"
                 >
-                  <option value="inscripciones_abiertas">Inscripciones abiertas</option>
+                  <option value="borrador">Borrador</option>
+                  <option value="publicado">Publicado</option>
                   <option value="en_curso">En curso</option>
+                  <option value="playoffs">Playoffs</option>
                   <option value="finalizado">Finalizado</option>
                 </select>
               </Field>
             )}
           </div>
 
-          {/* Fase Liga */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 flex flex-col gap-4">
             <div>
               <h2 className="font-semibold text-gray-900">Fase Liga</h2>
@@ -364,7 +408,6 @@ export default function TorneosSection() {
             </div>
           </div>
 
-          {/* Fase Playoffs */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 flex flex-col gap-4">
             <div>
               <h2 className="font-semibold text-gray-900">Fase Playoffs</h2>
@@ -440,6 +483,20 @@ export default function TorneosSection() {
         </button>
       </div>
 
+      {successMsg && (
+        <div className="mb-5 flex items-center justify-between gap-3 px-4 py-3 rounded-xl text-sm font-medium"
+          style={{ backgroundColor: '#dcfce7', color: '#1A6B3C' }}
+        >
+          <span>✓ {successMsg}</span>
+          <button
+            onClick={() => setSuccessMsg(null)}
+            className="flex-shrink-0 opacity-60 hover:opacity-100 transition-opacity"
+          >
+            <CloseIcon />
+          </button>
+        </div>
+      )}
+
       {loading ? (
         <div className="text-center py-16 text-gray-400 text-sm">Cargando torneos…</div>
       ) : torneos.length === 0 ? (
@@ -447,12 +504,13 @@ export default function TorneosSection() {
       ) : (
         <div className="flex flex-col gap-4">
           {torneos.map(t => {
-            const estado = ESTADO_META[t.estado] ?? ESTADO_META.inscripciones_abiertas
+            const estado = ESTADO_META[t.estado] ?? ESTADO_META.borrador
             const cat = CAT_META[t.categoria] ?? CAT_META.A
+            const isActioning = actionLoading === t.id
             return (
               <div
                 key={t.id}
-                className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex flex-col sm:flex-row sm:items-center gap-4"
+                className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex flex-col sm:flex-row sm:items-start gap-4"
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2.5 flex-wrap mb-1">
@@ -497,19 +555,77 @@ export default function TorneosSection() {
                   </div>
                 </div>
 
-                <div className="flex flex-shrink-0 gap-2">
-                  <button
-                    onClick={() => openEdit(t)}
-                    className="px-4 py-2 rounded-xl text-sm font-medium border border-gray-200 text-gray-600 hover:border-[#1A6B3C] hover:text-[#1A6B3C] transition-colors"
-                  >
-                    Editar
-                  </button>
-                  <button
-                    onClick={() => setDetailTorneo(t)}
-                    className="px-4 py-2 rounded-xl text-sm font-medium border border-gray-200 text-gray-600 hover:border-[#1A6B3C] hover:text-[#1A6B3C] transition-colors"
-                  >
-                    Ver detalles
-                  </button>
+                <div className="flex flex-shrink-0 flex-col gap-2 min-w-[130px]">
+                  {t.estado === 'borrador' && (
+                    <>
+                      <button
+                        onClick={() => handlePublish(t)}
+                        disabled={isActioning}
+                        className="w-full px-4 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+                        style={{ backgroundColor: '#1A6B3C' }}
+                      >
+                        {isActioning ? '…' : 'Publicar'}
+                      </button>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => openEdit(t)}
+                          className="flex-1 px-3 py-2 rounded-xl text-sm font-medium border border-gray-200 text-gray-600 hover:border-[#1A6B3C] hover:text-[#1A6B3C] transition-colors"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          onClick={() => { setDeleteTarget(t); setDeleteError(null) }}
+                          className="flex-1 px-3 py-2 rounded-xl text-sm font-medium border border-red-100 text-red-500 hover:bg-red-50 transition-colors"
+                        >
+                          Eliminar
+                        </button>
+                      </div>
+                    </>
+                  )}
+
+                  {t.estado === 'publicado' && (
+                    <>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleUnpublish(t)}
+                          disabled={isActioning}
+                          className="flex-1 px-3 py-2 rounded-xl text-sm font-medium border border-gray-200 text-gray-600 hover:border-gray-400 transition-colors disabled:opacity-60"
+                        >
+                          {isActioning ? '…' : 'Despublicar'}
+                        </button>
+                        <button
+                          onClick={() => openEdit(t)}
+                          className="flex-1 px-3 py-2 rounded-xl text-sm font-medium border border-gray-200 text-gray-600 hover:border-[#1A6B3C] hover:text-[#1A6B3C] transition-colors"
+                        >
+                          Editar
+                        </button>
+                      </div>
+                      <button
+                        onClick={() => { setDeleteTarget(t); setDeleteError(null) }}
+                        className="w-full px-4 py-2 rounded-xl text-sm font-medium border border-red-100 text-red-500 hover:bg-red-50 transition-colors"
+                      >
+                        Eliminar
+                      </button>
+                    </>
+                  )}
+
+                  {t.estado === 'en_curso' && (
+                    <button className="w-full px-4 py-2 rounded-xl text-sm font-medium border border-gray-200 text-gray-600 hover:border-[#1A6B3C] hover:text-[#1A6B3C] transition-colors">
+                      Ver partidos
+                    </button>
+                  )}
+
+                  {t.estado === 'playoffs' && (
+                    <button className="w-full px-4 py-2 rounded-xl text-sm font-medium border border-gray-200 text-gray-600 hover:border-[#2563eb] hover:text-[#2563eb] transition-colors">
+                      Ver bracket
+                    </button>
+                  )}
+
+                  {t.estado === 'finalizado' && (
+                    <button className="w-full px-4 py-2 rounded-xl text-sm font-medium border border-gray-200 text-gray-500 hover:bg-gray-50 transition-colors">
+                      Ver historial
+                    </button>
+                  )}
                 </div>
               </div>
             )
@@ -519,6 +635,16 @@ export default function TorneosSection() {
 
       {detailTorneo && (
         <DetailModal torneo={detailTorneo} onClose={() => setDetailTorneo(null)} />
+      )}
+
+      {deleteTarget && (
+        <DeleteModal
+          torneo={deleteTarget}
+          error={deleteError}
+          loading={deleteLoading}
+          onConfirm={handleDelete}
+          onCancel={() => { setDeleteTarget(null); setDeleteError(null) }}
+        />
       )}
     </div>
   )
@@ -553,7 +679,7 @@ function EmptyState({ onCreateClick }: { onCreateClick: () => void }) {
 }
 
 function DetailModal({ torneo, onClose }: { torneo: Torneo; onClose: () => void }) {
-  const estado = ESTADO_META[torneo.estado] ?? ESTADO_META.inscripciones_abiertas
+  const estado = ESTADO_META[torneo.estado] ?? ESTADO_META.borrador
   const cat = CAT_META[torneo.categoria] ?? CAT_META.A
 
   return (
@@ -594,7 +720,6 @@ function DetailModal({ torneo, onClose }: { torneo: Torneo; onClose: () => void 
             <DetailBlock label="Playoffs — inicio" value={fmtDate(torneo.fecha_playoffs_inicio)} />
             <DetailBlock label="Playoffs — fin"    value={fmtDate(torneo.fecha_playoffs_fin)} />
           </div>
-
           <div className="grid grid-cols-2 gap-3">
             <DetailBlock
               label="Cupos disponibles"
@@ -605,7 +730,6 @@ function DetailModal({ torneo, onClose }: { torneo: Torneo; onClose: () => void 
               value={fmtCOP(torneo.precio_inscripcion)}
             />
           </div>
-
           {torneo.descripcion && (
             <div>
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
@@ -622,6 +746,56 @@ function DetailModal({ torneo, onClose }: { torneo: Torneo; onClose: () => void 
         >
           Cerrar
         </button>
+      </div>
+    </div>
+  )
+}
+
+function DeleteModal({
+  torneo, error, loading, onConfirm, onCancel,
+}: {
+  torneo: Torneo
+  error: string | null
+  loading: boolean
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  const hasInscribed = torneo.cupos_disponibles < torneo.cupos_maximos
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 text-center">
+        <div className="w-12 h-12 rounded-full bg-red-50 flex items-center justify-center text-xl mx-auto mb-4">
+          🗑️
+        </div>
+        <h2 className="text-lg font-bold text-gray-900 mb-1">¿Eliminar torneo?</h2>
+        <p className="text-sm text-gray-500 mb-5">
+          Se eliminará permanentemente{' '}
+          <span className="font-semibold text-gray-700">{torneo.nombre}</span>.
+          Esta acción no se puede deshacer.
+        </p>
+
+        {(error || hasInscribed) && (
+          <div className="mb-5 px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-red-600 text-sm">
+            {error ?? 'No se puede eliminar un torneo con jugadores inscritos.'}
+          </div>
+        )}
+
+        <div className="flex gap-3">
+          <button
+            onClick={onCancel}
+            className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={loading || hasInscribed}
+            className="flex-1 py-2.5 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 transition-colors disabled:opacity-60"
+          >
+            {loading ? 'Eliminando…' : 'Eliminar'}
+          </button>
+        </div>
       </div>
     </div>
   )
