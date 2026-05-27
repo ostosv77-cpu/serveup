@@ -18,18 +18,28 @@ function fmtCOP(n: number) {
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
 
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) {
-    return NextResponse.json({ error: 'No autenticado' }, { status: 401 })
+  // ── 1. Autenticación ────────────────────────────────────────────────────
+  const { data: { user }, error: authErr } = await supabase.auth.getUser()
+  if (authErr || !user) {
+    console.error('[inscribir] step=auth error:', authErr)
+    return NextResponse.json({ error: 'No autenticado', step: 'auth' }, { status: 401 })
   }
+  console.log('[inscribir] user:', user.id)
 
-  const body = await req.json()
-  const { torneo_id } = body as { torneo_id?: string }
+  // ── 2. Parsear body ─────────────────────────────────────────────────────
+  let torneo_id: string | undefined
+  try {
+    const body = await req.json()
+    torneo_id = body.torneo_id
+  } catch {
+    return NextResponse.json({ error: 'Body inválido', step: 'parse' }, { status: 400 })
+  }
   if (!torneo_id) {
-    return NextResponse.json({ error: 'torneo_id requerido' }, { status: 400 })
+    return NextResponse.json({ error: 'torneo_id requerido', step: 'parse' }, { status: 400 })
   }
+  console.log('[inscribir] torneo_id:', torneo_id)
 
-  // Fetch torneo (solo publicados pueden recibir inscripciones)
+  // ── 3. Verificar torneo ─────────────────────────────────────────────────
   const { data: torneo, error: torneoErr } = await supabase
     .from('torneos')
     .select('*')
@@ -37,41 +47,61 @@ export async function POST(req: NextRequest) {
     .eq('estado', 'publicado')
     .single()
 
-  if (torneoErr || !torneo) {
-    return NextResponse.json({ error: 'Torneo no encontrado o no disponible' }, { status: 404 })
+  if (torneoErr) {
+    console.error('[inscribir] step=torneo_fetch code:', torneoErr.code, 'msg:', torneoErr.message)
+    return NextResponse.json(
+      { error: 'Torneo no encontrado o no disponible', step: 'torneo_fetch', code: torneoErr.code },
+      { status: 404 }
+    )
   }
 
   const cupos = torneo.cupos_disponibles ?? 0
+  console.log('[inscribir] cupos_disponibles:', cupos)
   if (cupos <= 0) {
-    return NextResponse.json({ error: 'No hay cupos disponibles en este torneo' }, { status: 409 })
+    return NextResponse.json({ error: 'No hay cupos disponibles', step: 'cupos_check' }, { status: 409 })
   }
 
-  // Verificar que el jugador no tenga 2 torneos activos ya
-  const { count: activasCount } = await supabase
+  // ── 4. Contar inscripciones activas del jugador ─────────────────────────
+  const { count: activasCount, error: countErr } = await supabase
     .from('inscripciones')
     .select('*', { count: 'exact', head: true })
     .eq('jugador_id', user.id)
     .eq('estado', 'activa')
 
-  if ((activasCount ?? 0) >= 2) {
-    return NextResponse.json({
-      error: 'Ya tienes 2 torneos activos — debes finalizar uno para inscribirte a otro',
-    }, { status: 409 })
+  if (countErr) {
+    console.error('[inscribir] step=count_activas code:', countErr.code, 'msg:', countErr.message)
+    return NextResponse.json(
+      { error: 'Error al verificar inscripciones activas', step: 'count_activas', code: countErr.code, detail: countErr.message },
+      { status: 500 }
+    )
   }
 
-  // Insertar inscripción (la constraint UNIQUE captura duplicados)
+  console.log('[inscribir] activas:', activasCount)
+  if ((activasCount ?? 0) >= 2) {
+    return NextResponse.json(
+      { error: 'Ya tienes 2 torneos activos — debes finalizar uno para inscribirte a otro', step: 'limit_check' },
+      { status: 409 }
+    )
+  }
+
+  // ── 5. Insertar inscripción ─────────────────────────────────────────────
   const { error: insErr } = await supabase
     .from('inscripciones')
     .insert({ jugador_id: user.id, torneo_id, estado: 'activa' })
 
   if (insErr) {
+    console.error('[inscribir] step=insert code:', insErr.code, 'msg:', insErr.message)
     if (insErr.code === '23505') {
-      return NextResponse.json({ error: 'Ya estás inscrito en este torneo' }, { status: 409 })
+      return NextResponse.json({ error: 'Ya estás inscrito en este torneo', step: 'insert' }, { status: 409 })
     }
-    return NextResponse.json({ error: 'Error al procesar la inscripción' }, { status: 500 })
+    return NextResponse.json(
+      { error: 'Error al procesar la inscripción', step: 'insert', code: insErr.code, detail: insErr.message },
+      { status: 500 }
+    )
   }
+  console.log('[inscribir] inscription inserted OK')
 
-  // Descontar cupo — si falla, hacemos rollback de la inscripción
+  // ── 6. Descontar cupo ───────────────────────────────────────────────────
   const { error: cuposErr } = await supabase
     .from('torneos')
     .update({ cupos_disponibles: cupos - 1 })
@@ -79,15 +109,21 @@ export async function POST(req: NextRequest) {
     .gt('cupos_disponibles', 0)
 
   if (cuposErr) {
+    console.error('[inscribir] step=cupos_update code:', cuposErr.code, 'msg:', cuposErr.message)
+    // Rollback inscripción
     await supabase
       .from('inscripciones')
       .delete()
       .eq('jugador_id', user.id)
       .eq('torneo_id', torneo_id)
-    return NextResponse.json({ error: 'Error al reservar cupo. Inténtalo de nuevo.' }, { status: 500 })
+    return NextResponse.json(
+      { error: 'Error al reservar cupo. Inténtalo de nuevo.', step: 'cupos_update', code: cuposErr.code, detail: cuposErr.message },
+      { status: 500 }
+    )
   }
+  console.log('[inscribir] cupos updated to', cupos - 1)
 
-  // Enviar correo de bienvenida (non-blocking — no falla la inscripción si el email falla)
+  // ── 7. Email de bienvenida (non-blocking) ───────────────────────────────
   if (process.env.RESEND_API_KEY) {
     const { data: jugador } = await supabase
       .from('jugadores')
@@ -98,7 +134,7 @@ export async function POST(req: NextRequest) {
     if (jugador?.email) {
       const resend = new Resend(process.env.RESEND_API_KEY)
       resend.emails.send({
-        from: 'ServeUp <noreply@serveup.co>',
+        from: 'ServeUp <onboarding@resend.dev>',
         to: jugador.email,
         subject: `¡Bienvenido a ${torneo.nombre}!`,
         html: `
@@ -125,7 +161,7 @@ export async function POST(req: NextRequest) {
             <p style="margin:28px 0 0;color:#1A6B3C;font-size:16px;font-weight:700;">🎾 Nos vemos en la cancha.</p>
           </div>
         `,
-      }).catch(() => {})
+      }).catch((emailErr: unknown) => console.error('[inscribir] email error:', emailErr))
     }
   }
 
