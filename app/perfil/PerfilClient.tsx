@@ -2,11 +2,20 @@
 
 import Image from 'next/image'
 import { useState, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
 type Nivel = 'recreativo' | 'intermedio' | 'avanzado' | 'competitivo'
+
+type TorneoActivo = {
+  id: string
+  nombre: string
+  categoria: string
+  ciudad: string
+  estado: string | null
+}
 
 type Jugador = {
   id: string
@@ -51,6 +60,13 @@ const CAT_META: Record<string, { label: string; bg: string; color: string }> = {
   D: { label: 'Categoría D', bg: '#dcfce7', color: '#16a34a' },
 }
 
+const ESTADO_LABEL: Record<string, { label: string; bg: string; color: string }> = {
+  publicado:  { label: 'Inscripciones abiertas', bg: '#dcfce7', color: '#1A6B3C' },
+  en_curso:   { label: 'Liga en curso',          bg: '#dbeafe', color: '#2563eb' },
+  playoffs:   { label: 'Playoffs',               bg: '#f3e8ff', color: '#7c3aed' },
+  finalizado: { label: 'Finalizado',             bg: '#f3f4f6', color: '#6b7280' },
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function fmtDate(d: string) {
@@ -73,12 +89,16 @@ export default function PerfilClient({
   torneos,
   inscritosIds: inscritosIdsProp,
   activasCount: activasCountProp,
+  torneosActivos,
 }: {
   jugador: Jugador
   torneos: Torneo[]
   inscritosIds: string[]
   activasCount: number
+  torneosActivos: TorneoActivo[]
 }) {
+  const router = useRouter()
+
   // Profile state
   const [jugador, setJugador] = useState<Jugador>(jugadorInit)
   const [editing, setEditing] = useState(false)
@@ -103,7 +123,6 @@ export default function PerfilClient({
   const [modal, setModal] = useState<Torneo | null>(null)
   const [inscribing, setInscribing] = useState(false)
   const [inscribirError, setInscribirError] = useState<string | null>(null)
-  const [successMsg, setSuccessMsg] = useState<string | null>(null)
 
   // ── Profile handlers ──────────────────────────────────────────────────────
 
@@ -212,19 +231,17 @@ export default function PerfilClient({
       return
     }
 
-    const torneoNombre = modal.nombre
-    setInscritosIds(prev => new Set([...prev, modal.id]))
-    setCuposMap(prev => ({ ...prev, [modal.id]: Math.max(0, (prev[modal.id] ?? 1) - 1) }))
-    setActivasCount(prev => prev + 1)
+    const torneoId = modal.id
     setModal(null)
     setInscribing(false)
-    setSuccessMsg(`¡Inscripción exitosa en ${torneoNombre}! Revisa tu correo con los detalles.`)
+    router.push(`/torneo/${torneoId}/liga?inscrito=1`)
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
 
   const nivelInfo = NIVEL_META[jugador.nivel as Nivel]
   const reachedLimit = activasCount >= 2
+  const disponibles = torneos.filter(t => !inscritosIds.has(t.id))
 
   return (
     <div className="min-h-screen bg-gray-50 font-sans">
@@ -243,19 +260,6 @@ export default function PerfilClient({
       </header>
 
       <main className="max-w-4xl mx-auto px-4 sm:px-6 py-10 flex flex-col gap-8">
-
-        {/* Success banner */}
-        {successMsg && (
-          <div
-            className="flex items-center justify-between gap-3 px-5 py-4 rounded-2xl text-sm font-medium"
-            style={{ backgroundColor: '#dcfce7', color: '#1A6B3C' }}
-          >
-            <span>✓ {successMsg}</span>
-            <button onClick={() => setSuccessMsg(null)} className="opacity-60 hover:opacity-100 flex-shrink-0">
-              <XIcon />
-            </button>
-          </div>
-        )}
 
         {/* ── Profile card ── */}
         <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 md:p-8">
@@ -391,13 +395,63 @@ export default function PerfilClient({
           )}
         </section>
 
+        {/* ── Mis torneos activos ── */}
+        {torneosActivos.length > 0 && (
+          <section>
+            <div className="mb-4">
+              <h2 className="text-lg font-bold text-gray-900">Mis torneos activos</h2>
+              <p className="text-sm text-gray-500 mt-0.5">
+                {torneosActivos.length} torneo{torneosActivos.length !== 1 ? 's' : ''} en curso
+              </p>
+            </div>
+            <div className="flex flex-col gap-3">
+              {torneosActivos.map(t => {
+                const cat = CAT_META[t.categoria] ?? { label: `Cat. ${t.categoria}`, bg: '#f3f4f6', color: '#6b7280' }
+                const estado = ESTADO_LABEL[t.estado ?? ''] ?? { label: t.estado ?? '—', bg: '#f3f4f6', color: '#6b7280' }
+                return (
+                  <div
+                    key={t.id}
+                    className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex flex-col sm:flex-row sm:items-center gap-4"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2 mb-1">
+                        <h3 className="font-semibold text-gray-900">{t.nombre}</h3>
+                        <span
+                          className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold flex-shrink-0"
+                          style={{ backgroundColor: cat.bg, color: cat.color }}
+                        >
+                          {cat.label}
+                        </span>
+                        <span
+                          className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold flex-shrink-0"
+                          style={{ backgroundColor: estado.bg, color: estado.color }}
+                        >
+                          {estado.label}
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-500">{t.ciudad}</p>
+                    </div>
+                    <a
+                      href={`/torneo/${t.id}/liga`}
+                      className="flex-shrink-0 px-5 py-2.5 rounded-xl text-sm font-semibold text-white hover:opacity-90 transition-opacity text-center"
+                      style={{ backgroundColor: '#1A6B3C' }}
+                    >
+                      Ver tabla de liga
+                    </a>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+        )}
+
         {/* ── Torneos disponibles ── */}
         <section>
           <div className="mb-4">
             <h2 className="text-lg font-bold text-gray-900">Torneos disponibles para mí</h2>
             {nivelInfo && (
               <p className="text-sm text-gray-500 mt-0.5">
-                {nivelInfo.cats} · {torneos.length} torneo{torneos.length !== 1 ? 's' : ''} abierto{torneos.length !== 1 ? 's' : ''}
+                {nivelInfo.cats} · {disponibles.length} torneo{disponibles.length !== 1 ? 's' : ''} abierto{disponibles.length !== 1 ? 's' : ''}
               </p>
             )}
           </div>
@@ -411,7 +465,7 @@ export default function PerfilClient({
             </div>
           )}
 
-          {torneos.length === 0 ? (
+          {disponibles.length === 0 ? (
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-14 flex flex-col items-center text-center gap-3">
               <div className="text-4xl">🎾</div>
               <h3 className="font-semibold text-gray-700">Sin torneos disponibles para tu nivel</h3>
@@ -421,12 +475,11 @@ export default function PerfilClient({
             </div>
           ) : (
             <div className="flex flex-col gap-4">
-              {torneos.map(t => {
-                const inscrito = inscritosIds.has(t.id)
+              {disponibles.map(t => {
                 const cupos = cuposMap[t.id] ?? t.cupos_disponibles ?? 0
                 const sinCupos = cupos <= 0
                 const cat = CAT_META[t.categoria] ?? { label: `Cat. ${t.categoria}`, bg: '#f3f4f6', color: '#6b7280' }
-                const disabled = inscrito || sinCupos || reachedLimit
+                const disabled = sinCupos || reachedLimit
 
                 return (
                   <div
@@ -434,7 +487,6 @@ export default function PerfilClient({
                     className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex flex-col sm:flex-row sm:items-start gap-4"
                   >
                     <div className="flex-1 min-w-0">
-                      {/* Title + badges */}
                       <div className="flex flex-wrap items-center gap-2 mb-1">
                         <h3 className="font-semibold text-gray-900">{t.nombre}</h3>
                         <span
@@ -443,14 +495,7 @@ export default function PerfilClient({
                         >
                           {cat.label}
                         </span>
-                        {inscrito && (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold flex-shrink-0"
-                            style={{ backgroundColor: '#dcfce7', color: '#1A6B3C' }}
-                          >
-                            ✓ Inscrito
-                          </span>
-                        )}
-                        {sinCupos && !inscrito && (
+                        {sinCupos && (
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold flex-shrink-0 bg-red-50 text-red-500">
                             Sin cupos
                           </span>
@@ -459,7 +504,6 @@ export default function PerfilClient({
 
                       <p className="text-sm text-gray-500 mb-3">{t.ciudad}, {t.pais}</p>
 
-                      {/* Dates */}
                       <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-500 mb-2">
                         <span>
                           <span className="font-medium text-gray-700">Liga: </span>
@@ -471,7 +515,6 @@ export default function PerfilClient({
                         </span>
                       </div>
 
-                      {/* Cupos + precio */}
                       <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
                         <span>
                           <span className="font-medium text-gray-700">Cupos: </span>
@@ -497,25 +540,15 @@ export default function PerfilClient({
                       )}
                     </div>
 
-                    {/* Action */}
                     <div className="flex-shrink-0 flex items-start pt-0.5">
-                      {inscrito ? (
-                        <span
-                          className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-semibold"
-                          style={{ backgroundColor: '#dcfce7', color: '#1A6B3C' }}
-                        >
-                          ✓ Inscrito
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => { setModal(t); setInscribirError(null) }}
-                          disabled={disabled}
-                          className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
-                          style={{ backgroundColor: '#1A6B3C' }}
-                        >
-                          Inscribirse
-                        </button>
-                      )}
+                      <button
+                        onClick={() => { setModal(t); setInscribirError(null) }}
+                        disabled={disabled}
+                        className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+                        style={{ backgroundColor: '#1A6B3C' }}
+                      >
+                        Inscribirse
+                      </button>
                     </div>
                   </div>
                 )
@@ -696,10 +729,3 @@ function PencilIcon() {
   )
 }
 
-function XIcon() {
-  return (
-    <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-    </svg>
-  )
-}

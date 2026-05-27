@@ -11,6 +11,14 @@ const NIVEL_CATS: Record<string, string[]> = {
   competitivo: ['A'],
 }
 
+type TorneoActivo = {
+  id: string
+  nombre: string
+  categoria: string
+  ciudad: string
+  estado: string | null
+}
+
 export default async function PerfilPage() {
   const supabase = await createClient()
 
@@ -36,12 +44,15 @@ export default async function PerfilPage() {
       .order('fecha_liga_inicio', { ascending: true }),
     supabase
       .from('inscripciones')
-      .select('torneo_id', { count: 'exact' })
+      .select('torneo_id, torneos(id, nombre, categoria, ciudad, estado)', { count: 'exact' })
       .eq('jugador_id', user.id)
       .eq('estado', 'activa'),
   ])
 
-  const inscritosIds = (inscripciones ?? []).map((i: { torneo_id: string }) => i.torneo_id)
+  type InscripcionRow = { torneo_id: string; torneos: TorneoActivo | null }
+  const rows = (inscripciones ?? []) as unknown as InscripcionRow[]
+  const inscritosIds = rows.map(i => i.torneo_id)
+  const torneosActivos = rows.map(i => i.torneos).filter(Boolean) as TorneoActivo[]
 
   return (
     <PerfilClient
@@ -49,6 +60,7 @@ export default async function PerfilPage() {
       torneos={(torneos ?? []) as Parameters<typeof PerfilClient>[0]['torneos']}
       inscritosIds={inscritosIds}
       activasCount={activasCount ?? 0}
+      torneosActivos={torneosActivos}
     />
   )
 }
