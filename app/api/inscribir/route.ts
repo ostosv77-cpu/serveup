@@ -62,11 +62,9 @@ export async function POST(req: NextRequest) {
   }
 
   // ── 4. Contar inscripciones activas del jugador ─────────────────────────
-  // Nota: no usar { head: true } — las peticiones HEAD no devuelven body,
-  // por lo que los errores de Supabase llegan sin code ni message.
-  const { data: activasData, error: countErr } = await supabase
+  const { count: activasCount, error: countErr } = await supabase
     .from('inscripciones')
-    .select('id')
+    .select('*', { count: 'exact', head: true })
     .eq('jugador_id', user.id)
     .eq('estado', 'activa')
 
@@ -78,9 +76,8 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const activasCount = activasData?.length ?? 0
   console.log('[inscribir] activas:', activasCount)
-  if (activasCount >= 2) {
+  if ((activasCount ?? 0) >= 2) {
     return NextResponse.json(
       { error: 'Ya tienes 2 torneos activos — debes finalizar uno para inscribirte a otro', step: 'limit_check' },
       { status: 409 }
